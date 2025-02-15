@@ -197,7 +197,7 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
         await location.enableBackgroundMode(enable: true);
         _logger.info('バックグラウンドモードが有効になりました');
         // 位置情報の更新間隔を設定
-        location.changeSettings(interval: 5000); // 5秒ごとに更新
+        location.changeSettings(interval: 1000); // 1秒ごとに更新
         _logger.info('位置情報の更新間隔が設定されました');
       }
     } catch (e) {
@@ -211,7 +211,7 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
 
     // 初回にリストをクリア (タイマー外で一度だけ)
     _locationDataList.clear(); // ここは最初に一度だけリセット
-    _timer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       final locationData = await LocationGyroView.getLocationData();
       final gyroData = await LocationGyroView.getGyroData();
       setState(() {
