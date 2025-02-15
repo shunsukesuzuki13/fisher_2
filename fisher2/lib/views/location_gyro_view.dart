@@ -208,7 +208,9 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
   void _startLocationAndGyroData() {
     _startTime = DateTime.now();
     _totalDistance = 0.0;
-    _locationDataList.clear(); // リストをクリア
+
+    // 初回にリストをクリア (タイマー外で一度だけ)
+    _locationDataList.clear(); // ここは最初に一度だけリセット
     _timer = Timer.periodic(const Duration(seconds: 10), (_) async {
       final locationData = await LocationGyroView.getLocationData();
       final gyroData = await LocationGyroView.getGyroData();
