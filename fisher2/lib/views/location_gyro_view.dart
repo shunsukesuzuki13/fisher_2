@@ -197,7 +197,7 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
         await location.enableBackgroundMode(enable: true);
         _logger.info('バックグラウンドモードが有効になりました');
         // 位置情報の更新間隔を設定
-        location.changeSettings(interval: 10000); // 10秒ごとに更新
+        location.changeSettings(interval: 5000); // 5秒ごとに更新
         _logger.info('位置情報の更新間隔が設定されました');
       }
     } catch (e) {
