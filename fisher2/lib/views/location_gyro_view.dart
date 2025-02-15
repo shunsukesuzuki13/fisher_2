@@ -211,7 +211,7 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
 
     // 初回にリストをクリア (タイマー外で一度だけ)
     _locationDataList.clear(); // ここは最初に一度だけリセット
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) async {
+    _timer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
       final locationData = await LocationGyroView.getLocationData();
       final gyroData = await LocationGyroView.getGyroData();
       setState(() {
