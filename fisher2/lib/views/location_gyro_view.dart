@@ -85,6 +85,8 @@ class _LocationGyroViewState extends State<LocationGyroView> {
   double _totalDistance = 0.0;
   AuthClient? _authClient;
   final List<loc.LocationData> _locationDataList = [];
+  final List<GyroscopeEvent> _gyroDataList = [];
+  final List<double> _distanceHistory = [];
   
   @override
   void initState() {
@@ -129,8 +131,8 @@ class _LocationGyroViewState extends State<LocationGyroView> {
       final now = DateTime.now();
       final formattedDate = DateFormat('yyyyMMdd_HHmmss').format(now);
 
-      // 日付を含むファイルパスを作成
-      final path = '${directory.path}/$formattedDate.txt';
+      // 拡張子を .csv に変更
+      final path = '${directory.path}/$formattedDate.csv';
       final file = File(path);
 
       // ディレクトリが存在しない場合は作成
@@ -152,22 +154,27 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     await _requestPermissions(); // パーミッションをリクエスト
 
     try {
-      // 計測時間を計算
-      final duration = _endTime!.difference(_startTime!);
-      final formattedDuration =
-          (duration.inSeconds / 60).toStringAsFixed(2); // 分単位に変換
-      final formattedDistance = _totalDistance.toStringAsFixed(2);
-
-      // 保存するデータを準備
-      final data = '''
-Measurement Duration: $formattedDuration minutes
-Total Distance: $formattedDistance meters
-Current Location: ${_currentLocation?.toString()}
-Previous Location: ${_previousLocation?.toString()}
-Current Gyro Data: ${_currentGyroData?.toString()}
-Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
-''';
-
+      // CSV形式のデータ作成
+      final data = [
+        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,TotalDistance',
+        for (int i = 0; i < _gyroDataList.length; i++)
+          '${DateTime.now().toIso8601String()},'
+              '${_locationDataList.isNotEmpty ? _locationDataList.last.latitude : 0.0},'
+              '${_locationDataList.isNotEmpty ? _locationDataList.last.longitude : 0.0},'
+              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},${_distanceHistory[i]}'
+      ].join('\n');
+//       // 保存するデータを準備
+//       final data = '''
+// Measurement Duration: $formattedDuration minutes
+// Total Distance: $formattedDistance meters
+// Current Location: ${_currentLocation?.toString()}
+// Previous Location: ${_previousLocation?.toString()}
+// Current Gyro Data: ${_currentGyroData?.toString()}
+// Location Data List:
+// ${_locationDataList.map((loc) => loc.toString()).join('\n')}
+// Gyro Data List:
+// ${_gyroDataList.map((gyro) => gyro.toString()).join('\n')}
+// ''';
       // データをローカルストレージに保存
       await _saveDataLocally(data);
     } catch (e) {
@@ -210,22 +217,36 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
     _totalDistance = 0.0;
 
     // 初回にリストをクリア (タイマー外で一度だけ)
-    _locationDataList.clear(); // ここは最初に一度だけリセット
+    _locationDataList.clear();
+    _gyroDataList.clear();
     _timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       final locationData = await LocationGyroView.getLocationData();
       final gyroData = await LocationGyroView.getGyroData();
-      setState(() {
-        if (_previousLocation != null && locationData != null) {
-          _totalDistance +=
-              _calculateDistance(_previousLocation!, locationData);
-        }
-        _previousLocation = locationData;
-        _currentLocation = locationData;
-        _currentGyroData = gyroData;
-        if (locationData != null) {
+
+      if (locationData != null) {
+        setState(() {
+          // 位置情報が前回の情報と異なれば距離を計算
+          if (_previousLocation != null) {
+            // 現在位置と前回位置の差分を計算
+            _totalDistance +=
+                _calculateDistance(_previousLocation!, locationData);
+          }
+
+          // 前回位置情報の更新
+          _previousLocation = locationData;
+
+          // 現在の位置とジャイロデータの保存
+          _currentLocation = locationData;
+          _currentGyroData = gyroData;
+
+          // データリストに追加
           _locationDataList.add(locationData); // 位置データをリストに追加
-        }
-      });
+          if (gyroData != null) {
+            _gyroDataList.add(gyroData); // ジャイロデータをリストに追加
+          }
+          _distanceHistory.add(_totalDistance);
+        });
+      }
     });
   }
 
@@ -345,7 +366,9 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
             Padding(
               padding: const EdgeInsets.all(10),
               child: Text(
-                'Location: $_currentLocation\nGyroscope: $_currentGyroData',
+                'Location: $_currentLocation\n'
+                'Gyroscope: $_currentGyroData\n'
+                'Total Distance: $_totalDistance meters', // 移動距離を追加
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
             ),
@@ -371,3 +394,4 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
     );
   }
 }
+
