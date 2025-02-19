@@ -42,6 +42,8 @@ class _FullFunctionViewState extends State<FullFunctionView> {
   bool _isCollectingData = false;
   bool _isRecording = false;
   double _totalDistance = 0.0;
+  AccelerometerEvent? _currentAccelData;
+  final List<AccelerometerEvent> _accelDataList = [];
 
   @override
   void initState() {
@@ -106,12 +108,14 @@ class _FullFunctionViewState extends State<FullFunctionView> {
       // 初回にリストをクリア (タイマー外で一度だけ)
       _locationDataList.clear();
       _gyroDataList.clear();
+      _accelDataList.clear();
       _distanceHistory.clear();
 
       // タイマー設定：500msごとに位置情報とジャイロデータを取得
       _timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
         final locationData = await LocationGyroView.getLocationData();
         final gyroData = await LocationGyroView.getGyroData();
+        final accelData = await LocationGyroView.getAccelData();
 
         if (locationData != null) {
           setState(() {
@@ -134,6 +138,11 @@ class _FullFunctionViewState extends State<FullFunctionView> {
             if (gyroData != null) {
               _gyroDataList.add(gyroData); // ジャイロデータをリストに追加
             }
+            if (accelData != null) {
+            // ここで加速度データをnullチェック
+            _currentAccelData = accelData;
+            _accelDataList.add(accelData);
+          }
             _distanceHistory.add(_totalDistance); // 移動距離をリストに追加
           });
         }
@@ -197,9 +206,11 @@ class _FullFunctionViewState extends State<FullFunctionView> {
         _currentLocation = null; // 位置情報をnullにリセット
         _previousLocation = null; // 前回の位置情報をnullにリセット
         _currentGyroData = null; // ジャイロデータをnullにリセット
+        _currentAccelData = null;
         _totalDistance = 0.0; // 移動距離を0にリセット
         _locationDataList.clear(); // 位置データリストをクリア
         _gyroDataList.clear(); // ジャイロデータリストをクリア
+        _accelDataList.clear();
         _distanceHistory.clear(); // 距離履歴リストをクリア
       });
 
@@ -317,13 +328,16 @@ class _FullFunctionViewState extends State<FullFunctionView> {
       // CSV形式のデータ作成
       final data = [
         'Version: 3',
-        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,TotalDistance',
+        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,AccelX,AccelY,AccelZ,TotalDistance',
         for (int i = 0; i < _gyroDataList.length; i++)
           '${DateTime.now().toIso8601String()},'
               '${_locationDataList.isNotEmpty ? _locationDataList.last.latitude : 0.0},'
               '${_locationDataList.isNotEmpty ? _locationDataList.last.longitude : 0.0},'
-              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},${_distanceHistory[i]}'
+              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},'
+              '${_accelDataList[i].x},${_accelDataList[i].y},${_accelDataList[i].z},'
+              '${_distanceHistory[i]}'
       ].join('\n');
+
       // データをローカルストレージに保存
       await _saveDataLocally(data);
     } catch (e) {
@@ -362,6 +376,7 @@ class _FullFunctionViewState extends State<FullFunctionView> {
                     'Version: 3\n'
                     'Location: $_currentLocation\n'
                     'Gyroscope: $_currentGyroData\n'
+                    'Accelerometer: $_currentAccelData\n'
                     'Total Distance: $_totalDistance meters',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
@@ -442,4 +457,3 @@ class _FullFunctionViewState extends State<FullFunctionView> {
     );
   }
 }
-
