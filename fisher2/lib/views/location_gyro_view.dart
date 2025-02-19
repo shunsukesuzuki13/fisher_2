@@ -43,6 +43,15 @@ class LocationGyroView extends StatefulWidget {
     }
   }
 
+  static Future<AccelerometerEvent?> getAccelData() async {
+    try {
+      return await accelerometerEventStream().first; // 最新の加速度データを取得
+    } catch (e) {
+      Logger('LocationGyroView').severe('加速度データの取得中にエラーが発生しました', e);
+      return null;
+    }
+  }
+
   static Future<void> uploadToGoogleDrive(
       io.File file, AuthClient authClient, String folderID) async {
     try {
@@ -87,6 +96,8 @@ class _LocationGyroViewState extends State<LocationGyroView> {
   final List<loc.LocationData> _locationDataList = [];
   final List<GyroscopeEvent> _gyroDataList = [];
   final List<double> _distanceHistory = [];
+  AccelerometerEvent? _currentAccelData;
+  final List<AccelerometerEvent> _accelDataList = [];
 
   @override
   void initState() {
@@ -157,12 +168,14 @@ class _LocationGyroViewState extends State<LocationGyroView> {
       // CSV形式のデータ作成
       final data = [
         'Version: 3',
-        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,TotalDistance',
+        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,AccelX,AccelY,AccelZ,TotalDistance',
         for (int i = 0; i < _gyroDataList.length; i++)
           '${DateTime.now().toIso8601String()},'
               '${_locationDataList.isNotEmpty ? _locationDataList.last.latitude : 0.0},'
               '${_locationDataList.isNotEmpty ? _locationDataList.last.longitude : 0.0},'
-              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},${_distanceHistory[i]}'
+              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},'
+              '${_accelDataList[i].x},${_accelDataList[i].y},${_accelDataList[i].z},'
+              '${_distanceHistory[i]}'
       ].join('\n');
       // データをローカルストレージに保存
       await _saveDataLocally(data);
@@ -205,9 +218,11 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     _currentLocation = null; // 位置情報をnullにリセット
     _previousLocation = null; // 前回の位置情報をnullにリセット
     _currentGyroData = null; // ジャイロデータをnullにリセット
+    _currentAccelData = null;
     _totalDistance = 0.0; // 移動距離を0にリセット
     _locationDataList.clear(); // 位置データリストをクリア
     _gyroDataList.clear(); // ジャイロデータリストをクリア
+    _accelDataList.clear();
     _distanceHistory.clear(); // 距離履歴リストをクリア
 
     _startTime = DateTime.now();
@@ -216,9 +231,11 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     // 初回にリストをクリア (タイマー外で一度だけ)
     _locationDataList.clear();
     _gyroDataList.clear();
+    _accelDataList.clear();
     _timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       final locationData = await LocationGyroView.getLocationData();
       final gyroData = await LocationGyroView.getGyroData();
+      final accelData = await LocationGyroView.getAccelData();
 
       if (locationData != null) {
         setState(() {
@@ -241,6 +258,13 @@ class _LocationGyroViewState extends State<LocationGyroView> {
           if (gyroData != null) {
             _gyroDataList.add(gyroData); // ジャイロデータをリストに追加
           }
+
+          if (accelData != null) {
+            // ここで加速度データをnullチェック
+            _currentAccelData = accelData;
+            _accelDataList.add(accelData);
+          }
+
           _distanceHistory.add(_totalDistance);
         });
       }
@@ -255,13 +279,15 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     await _saveDataToFile();
     _timer?.cancel();
     _showSummary();
-    
+
     _currentLocation = null; // 位置情報をnullにリセット
     _previousLocation = null; // 前回の位置情報をnullにリセット
     _currentGyroData = null; // ジャイロデータをnullにリセット
+    _currentAccelData = null;
     _totalDistance = 0.0; // 移動距離を0にリセット
     _locationDataList.clear(); // 位置データリストをクリア
     _gyroDataList.clear(); // ジャイロデータリストをクリア
+    _accelDataList.clear();
     _distanceHistory.clear(); // 距離履歴リストをクリア
   }
 
@@ -392,6 +418,7 @@ class _LocationGyroViewState extends State<LocationGyroView> {
                 'Version: 3\n'
                 'Location: $_currentLocation\n'
                 'Gyroscope: $_currentGyroData\n'
+                'Accelerometer: $_currentAccelData\n'
                 'Total Distance: $_totalDistance meters', // 移動距離を追加
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
