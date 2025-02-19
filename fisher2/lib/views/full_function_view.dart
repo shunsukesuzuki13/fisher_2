@@ -327,7 +327,7 @@ class _FullFunctionViewState extends State<FullFunctionView> {
     try {
       // CSV形式のデータ作成
       final data = [
-        'Version: 3',
+        'Version: 4',
         'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,AccelX,AccelY,AccelZ,TotalDistance',
         for (int i = 0; i < _gyroDataList.length; i++)
           '${DateTime.now().toIso8601String()},'
@@ -373,7 +373,7 @@ class _FullFunctionViewState extends State<FullFunctionView> {
                 Padding(
                   padding: const EdgeInsets.all(10),
                   child: Text(
-                    'Version: 3\n'
+                    'Version: 4\n'
                     'Location: $_currentLocation\n'
                     'Gyroscope: $_currentGyroData\n'
                     'Accelerometer: $_currentAccelData\n'
