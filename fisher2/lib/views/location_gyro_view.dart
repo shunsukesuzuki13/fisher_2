@@ -87,7 +87,7 @@ class _LocationGyroViewState extends State<LocationGyroView> {
   final List<loc.LocationData> _locationDataList = [];
   final List<GyroscopeEvent> _gyroDataList = [];
   final List<double> _distanceHistory = [];
-  
+
   @override
   void initState() {
     super.initState();
@@ -156,6 +156,7 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     try {
       // CSV形式のデータ作成
       final data = [
+        'Version: 3',
         'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,TotalDistance',
         for (int i = 0; i < _gyroDataList.length; i++)
           '${DateTime.now().toIso8601String()},'
@@ -163,18 +164,6 @@ class _LocationGyroViewState extends State<LocationGyroView> {
               '${_locationDataList.isNotEmpty ? _locationDataList.last.longitude : 0.0},'
               '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},${_distanceHistory[i]}'
       ].join('\n');
-//       // 保存するデータを準備
-//       final data = '''
-// Measurement Duration: $formattedDuration minutes
-// Total Distance: $formattedDistance meters
-// Current Location: ${_currentLocation?.toString()}
-// Previous Location: ${_previousLocation?.toString()}
-// Current Gyro Data: ${_currentGyroData?.toString()}
-// Location Data List:
-// ${_locationDataList.map((loc) => loc.toString()).join('\n')}
-// Gyro Data List:
-// ${_gyroDataList.map((gyro) => gyro.toString()).join('\n')}
-// ''';
       // データをローカルストレージに保存
       await _saveDataLocally(data);
     } catch (e) {
@@ -213,6 +202,14 @@ class _LocationGyroViewState extends State<LocationGyroView> {
   }
 
   void _startLocationAndGyroData() {
+    _currentLocation = null; // 位置情報をnullにリセット
+    _previousLocation = null; // 前回の位置情報をnullにリセット
+    _currentGyroData = null; // ジャイロデータをnullにリセット
+    _totalDistance = 0.0; // 移動距離を0にリセット
+    _locationDataList.clear(); // 位置データリストをクリア
+    _gyroDataList.clear(); // ジャイロデータリストをクリア
+    _distanceHistory.clear(); // 距離履歴リストをクリア
+
     _startTime = DateTime.now();
     _totalDistance = 0.0;
 
@@ -250,14 +247,22 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     });
   }
 
-  void _stopLocationAndGyroData() {
+  void _stopLocationAndGyroData() async {
     if (_timer == null || !_timer!.isActive) {
       return;
     }
     _endTime = DateTime.now();
+    await _saveDataToFile();
     _timer?.cancel();
     _showSummary();
-    _saveDataToFile(); // データを保存する
+    
+    _currentLocation = null; // 位置情報をnullにリセット
+    _previousLocation = null; // 前回の位置情報をnullにリセット
+    _currentGyroData = null; // ジャイロデータをnullにリセット
+    _totalDistance = 0.0; // 移動距離を0にリセット
+    _locationDataList.clear(); // 位置データリストをクリア
+    _gyroDataList.clear(); // ジャイロデータリストをクリア
+    _distanceHistory.clear(); // 距離履歴リストをクリア
   }
 
   double _calculateDistance(loc.LocationData start, loc.LocationData end) {
@@ -350,11 +355,16 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     super.dispose();
   }
 
+  bool _isCollectingData = false; // データ取得中の状態を管理
+
   @override
   Widget build(BuildContext context) {
     final GoogleSignInPlugin plugin = GoogleSignInPlugin();
 
     return Scaffold(
+      backgroundColor: _isCollectingData
+          ? Colors.lightGreen[100]
+          : Colors.white, // データ取得中の背景色を変更
       appBar: AppBar(
         title: Text(widget.title),
         centerTitle: true,
@@ -363,9 +373,23 @@ class _LocationGyroViewState extends State<LocationGyroView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
+            // データ取得中の表示
+            if (_isCollectingData)
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Text(
+                  '📡 データ取得中...',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.all(10),
               child: Text(
+                'Version: 3\n'
                 'Location: $_currentLocation\n'
                 'Gyroscope: $_currentGyroData\n'
                 'Total Distance: $_totalDistance meters', // 移動距離を追加
@@ -378,12 +402,26 @@ class _LocationGyroViewState extends State<LocationGyroView> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 ElevatedButton(
-                  onPressed: _startLocationAndGyroData,
+                  onPressed: _isCollectingData
+                      ? null
+                      : () {
+                          _startLocationAndGyroData();
+                          setState(() {
+                            _isCollectingData = true; // データ取得中に設定
+                          });
+                        },
                   child: const Text('Start'),
                 ),
                 const SizedBox(width: 20),
                 ElevatedButton(
-                  onPressed: _stopLocationAndGyroData,
+                  onPressed: !_isCollectingData
+                      ? null
+                      : () {
+                          _stopLocationAndGyroData();
+                          setState(() {
+                            _isCollectingData = false; // データ取得終了に設定
+                          });
+                        },
                   child: const Text('Stop'),
                 ),
               ],
@@ -394,4 +432,3 @@ class _LocationGyroViewState extends State<LocationGyroView> {
     );
   }
 }
-
