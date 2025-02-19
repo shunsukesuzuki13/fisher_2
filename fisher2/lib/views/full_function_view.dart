@@ -34,10 +34,14 @@ class _FullFunctionViewState extends State<FullFunctionView> {
   final Logger _logger = Logger('HomeView');
   bool _isLoggingSetup = false;
   VideoPlayerController? _videoPlayerController;
-
+  final List<GyroscopeEvent> _gyroDataList = [];
+  final List<double> _distanceHistory = [];
   DateTime? _startTime;
   DateTime? _endTime;
   final List<loc.LocationData> _locationDataList = [];
+  bool _isCollectingData = false;
+  bool _isRecording = false;
+  double _totalDistance = 0.0;
 
   @override
   void initState() {
@@ -98,14 +102,44 @@ class _FullFunctionViewState extends State<FullFunctionView> {
     try {
       await _initializeControllerFuture;
       _startTime = DateTime.now();
-      _timer = Timer.periodic(const Duration(seconds: 10), (_) async {
-        final data = await GetDate.getPositionAndGyroData(location);
-        setState(() {
-          _currentLocation = data['location'];
-          _currentGyroData = data['gyroscope'];
-          _locationDataList.add(_currentLocation!);
-        });
+
+      // 初回にリストをクリア (タイマー外で一度だけ)
+      _locationDataList.clear();
+      _gyroDataList.clear();
+      _distanceHistory.clear();
+
+      // タイマー設定：500msごとに位置情報とジャイロデータを取得
+      _timer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+        final locationData = await LocationGyroView.getLocationData();
+        final gyroData = await LocationGyroView.getGyroData();
+
+        if (locationData != null) {
+          setState(() {
+            // 位置情報が前回の情報と異なれば距離を計算
+            if (_previousLocation != null) {
+              // 現在位置と前回位置の差分を計算
+              _totalDistance +=
+                  _calculateDistance(_previousLocation!, locationData);
+            }
+
+            // 前回位置情報の更新
+            _previousLocation = locationData;
+
+            // 現在の位置とジャイロデータの保存
+            _currentLocation = locationData;
+            _currentGyroData = gyroData;
+
+            // データリストに追加
+            _locationDataList.add(locationData); // 位置データをリストに追加
+            if (gyroData != null) {
+              _gyroDataList.add(gyroData); // ジャイロデータをリストに追加
+            }
+            _distanceHistory.add(_totalDistance); // 移動距離をリストに追加
+          });
+        }
       });
+
+      // ビデオ録画の開始
       await _startVideoRecording();
     } catch (e) {
       _handleError('位置情報の取得と録画の開始中にエラーが発生しました', e);
@@ -136,11 +170,9 @@ class _FullFunctionViewState extends State<FullFunctionView> {
     try {
       final XFile videoFile = await _cameraController!.stopVideoRecording();
       _endTime = DateTime.now();
-      setState(() {
-        _videoPath = videoFile.path;
-        _initializeVideoPlayer();
-      });
-      _logger.info('Video recorded to: $_videoPath');
+
+      // ビデオファイルパスとプレイヤーの初期化を一旦セット
+      _videoPath = videoFile.path;
 
       // XFile を File に変換してからコピー
       final File file = File(videoFile.path);
@@ -150,7 +182,28 @@ class _FullFunctionViewState extends State<FullFunctionView> {
       final newFile = await file.copy(newPath);
       _logger.info('Video copied to: ${newFile.path}');
 
+      // データ保存処理
+      await _saveDataToFile();
+
+      // サマリー表示
       _showSummary();
+
+      // ここでは非同期処理が全て完了してから、状態更新を行う
+      setState(() {
+        _videoPath = newFile.path; // 新しいビデオパスをセット
+        _initializeVideoPlayer(); // プレイヤーの初期化（void型だからawait不要）
+
+        // 状態をリセット
+        _currentLocation = null; // 位置情報をnullにリセット
+        _previousLocation = null; // 前回の位置情報をnullにリセット
+        _currentGyroData = null; // ジャイロデータをnullにリセット
+        _totalDistance = 0.0; // 移動距離を0にリセット
+        _locationDataList.clear(); // 位置データリストをクリア
+        _gyroDataList.clear(); // ジャイロデータリストをクリア
+        _distanceHistory.clear(); // 距離履歴リストをクリア
+      });
+
+      _logger.info('Video recorded and processed successfully.');
     } catch (e) {
       _handleError('ビデオ録画の停止中にエラーが発生しました', e);
     }
@@ -183,36 +236,23 @@ class _FullFunctionViewState extends State<FullFunctionView> {
 
   void _showSummary() {
     final duration = _endTime!.difference(_startTime!);
-    final distance = _calculateDistance();
+    //final distance = _calculateDistance();
     final summary =
-        '開始時刻: $_startTime\n終了時刻: $_endTime\n移動距離: ${distance.toStringAsFixed(2)}m\n経過時間: ${duration.inSeconds}秒';
+        '開始時刻: $_startTime\n終了時刻: $_endTime\n移動距離: ${_totalDistance.toStringAsFixed(2)}m\n経過時間: ${duration.inSeconds}秒';
     _showErrorSnackBar(summary);
   }
 
-  double _calculateDistance() {
-    double totalDistance = 0.0;
-    for (int i = 1; i < _locationDataList.length; i++) {
-      totalDistance += _distanceBetween(
-        _locationDataList[i - 1].latitude!,
-        _locationDataList[i - 1].longitude!,
-        _locationDataList[i].latitude!,
-        _locationDataList[i].longitude!,
-      );
-    }
-    return totalDistance;
-  }
-
-  double _distanceBetween(double lat1, double lon1, double lat2, double lon2) {
-    const double R = 6371000; // 地球の半径 (メートル)
-    final double dLat = _degreesToRadians(lat2 - lat1);
-    final double dLon = _degreesToRadians(lon2 - lon1);
-    final double a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_degreesToRadians(lat1)) *
-            cos(_degreesToRadians(lat2)) *
+  double _calculateDistance(loc.LocationData start, loc.LocationData end) {
+    const double earthRadius = 6371000; // メートル
+    final double dLat = _degreesToRadians(end.latitude! - start.latitude!);
+    final double dLon = _degreesToRadians(end.longitude! - start.longitude!);
+    final double a = (sin(dLat / 2) * sin(dLat / 2)) +
+        (cos(_degreesToRadians(start.latitude!)) *
+            cos(_degreesToRadians(end.latitude!)) *
             sin(dLon / 2) *
-            sin(dLon / 2);
+            sin(dLon / 2));
     final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return R * c;
+    return earthRadius * c;
   }
 
   double _degreesToRadians(double degrees) {
@@ -251,8 +291,8 @@ class _FullFunctionViewState extends State<FullFunctionView> {
       final now = DateTime.now();
       final formattedDate = DateFormat('yyyyMMdd_HHmmss').format(now);
 
-      // 日付を含むファイルパスを作成
-      final path = '${directory.path}/$formattedDate.txt';
+      // 拡張子を .csv に変更
+      final path = '${directory.path}/$formattedDate.csv';
       final file = File(path);
 
       // ディレクトリが存在しない場合は作成
@@ -271,24 +311,19 @@ class _FullFunctionViewState extends State<FullFunctionView> {
   }
 
   Future<void> _saveDataToFile() async {
+    await _requestPermissions(); // パーミッションをリクエスト
+
     try {
-      // 計測時間を計算
-      final duration = _endTime!.difference(_startTime!);
-      final formattedDuration =
-          (duration.inSeconds / 60).toStringAsFixed(2); // 分単位に変換
-      final totalDistance = _calculateDistance();
-      final formattedDistance = totalDistance.toStringAsFixed(2);
-
-      // 保存するデータを準備
-      final data = '''
-Measurement Duration: $formattedDuration minutes
-Total Distance: $formattedDistance meters
-Current Location: ${_currentLocation?.toString()}
-Previous Location: ${_previousLocation?.toString()}
-Current Gyro Data: ${_currentGyroData?.toString()}
-Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
-''';
-
+      // CSV形式のデータ作成
+      final data = [
+        'Version: 3',
+        'Timestamp,Latitude,Longitude,GyroX,GyroY,GyroZ,TotalDistance',
+        for (int i = 0; i < _gyroDataList.length; i++)
+          '${DateTime.now().toIso8601String()},'
+              '${_locationDataList.isNotEmpty ? _locationDataList.last.latitude : 0.0},'
+              '${_locationDataList.isNotEmpty ? _locationDataList.last.longitude : 0.0},'
+              '${_gyroDataList[i].x},${_gyroDataList[i].y},${_gyroDataList[i].z},${_distanceHistory[i]}'
+      ].join('\n');
       // データをローカルストレージに保存
       await _saveDataLocally(data);
     } catch (e) {
@@ -308,64 +343,103 @@ Location Data List: ${_locationDataList.map((loc) => loc.toString()).join('\n')}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor:
+          _isCollectingData ? Colors.lightGreen[100] : Colors.white,
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
         centerTitle: true,
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Text(
-                'Location: $_currentLocation\nGyroscope: $_currentGyroData\nVideo Path: $_videoPath',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
-            if (_cameraController != null &&
-                _cameraController!.value.isInitialized)
-              Expanded(
-                child: CameraPreview(_cameraController!),
-              ),
-            OverflowBar(
-              alignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  height: 50,
-                  width: 105,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      await _initializeCamera();
-                      _getLocationAndStartRecording();
-                    },
-                    child: const Text('start'),
+      body: Stack(
+        children: [
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Text(
+                    'Version: 3\n'
+                    'Location: $_currentLocation\n'
+                    'Gyroscope: $_currentGyroData\n'
+                    'Total Distance: $_totalDistance meters',
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 ),
-                SizedBox(
-                  height: 50,
-                  width: 105,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      _timer?.cancel();
-                      await _stopVideoRecording();
-                      await _saveDataToFile();
-                      _cameraController?.dispose();
-                      _videoPlayerController?.dispose();
-                      setState(() {
-                        _cameraController = null;
-                        _videoPlayerController = null;
-                      });
-                    },
-                    child: const Text('stop'),
+                if (_cameraController != null &&
+                    _cameraController!.value.isInitialized)
+                  Expanded(
+                    child: CameraPreview(_cameraController!),
                   ),
+                OverflowBar(
+                  alignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      height: 50,
+                      width: 105,
+                      child: ElevatedButton(
+                        onPressed: _isRecording || _isCollectingData
+                            ? null
+                            : () async {
+                                await _initializeCamera();
+                                _getLocationAndStartRecording();
+                                setState(() {
+                                  _isCollectingData = true;
+                                  _isRecording = true;
+                                });
+                              },
+                        child: const Text('start'),
+                      ),
+                    ),
+                    SizedBox(
+                      height: 50,
+                      width: 105,
+                      child: ElevatedButton(
+                        onPressed: !_isRecording
+                            ? null
+                            : () async {
+                                _timer?.cancel();
+                                await _stopVideoRecording();
+                                _cameraController?.dispose();
+                                _videoPlayerController?.dispose();
+                                setState(() {
+                                  _isCollectingData = false;
+                                  _isRecording = false;
+                                  _cameraController = null;
+                                  _videoPlayerController = null;
+                                });
+                              },
+                        child: const Text('stop'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          if (_isCollectingData)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                color: Colors.red.withOpacity(0.8),
+                child: const Center(
+                  child: Text(
+                    '📹 録画中...',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
+
